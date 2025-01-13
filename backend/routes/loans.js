@@ -1,27 +1,63 @@
 const express = require('express');
+const Loan = require('../models/loan');
+const User = require('../models/user');
 const router = express.Router();
-const Loan = require('../models/Loan'); // Assuming the model is in the `models` folder
+const jwt = require('jsonwebtoken');
 
-// Apply for Loan
-router.post('/apply', async (req, res) => {
+// Middleware to authenticate user
+function authenticateToken(req, res, next) {
+    const token = req.headers['authorization'];
+    if (!token) return res.status(401).send({ error: 'Access denied, no token provided' });
+
     try {
-        const { userId, amount, interest } = req.body;
-        const loan = new Loan({ userId, amount, interest });
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = verified; // Attach the decoded user info to the request
+        next();
+    } catch (error) {
+        res.status(403).send({ error: 'Invalid token' });
+    }
+}
+
+// Apply for a Loan
+router.post('/apply', authenticateToken, async (req, res) => {
+    try {
+        const { amount, duration, purpose } = req.body;
+
+        // Validate input
+        if (!amount || !duration || !purpose) {
+            return res.status(400).send({ error: 'All fields are required: amount, duration, purpose' });
+        }
+
+        // Create and save loan application
+        const loan = new Loan({
+            userId: req.user.id,
+            amount,
+            duration,
+            purpose
+        });
         await loan.save();
-        res.status(201).json({ message: 'Loan application successful', loan });
-    } catch (err) {
-        res.status(400).json({ error: err.message });
+
+        res.status(201).send({ message: 'Loan application submitted successfully' });
+    } catch (error) {
+        console.error('Loan application error:', error);
+        res.status(400).send({ error: 'Error applying for loan' });
     }
 });
 
-// Fetch Loans
-router.get('/:userId', async (req, res) => {
+// Get Loans for a User
+router.get('/user-loans', authenticateToken, async (req, res) => {
     try {
-        const { userId } = req.params;
-        const loans = await Loan.find({ userId });
-        res.status(200).json(loans);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        const loans = await Loan.find({ userId: req.user.id });
+
+        // Check if the user has any loans
+        if (loans.length === 0) {
+            return res.status(404).send({ message: 'No loans found for this user' });
+        }
+
+        res.send(loans);
+    } catch (error) {
+        console.error('Error fetching loans:', error);
+        res.status(500).send({ error: 'Error fetching loans' });
     }
 });
 
